@@ -1,4 +1,4 @@
-c = ["Hyderabad","Chennai",
+cities = ["Hyderabad","Chennai",
     "Kolkata", "Pune", "Ahmedabad",
     "Surat", "Rajkot", "Vadodara", "Morbi", "Bhavnagar",
     "Ludhiana", "Jalandhar", "Amritsar",
@@ -40,7 +40,7 @@ c = ["Hyderabad","Chennai",
     "Shillong"
  ]   
 
-x = [
+Keywords = [
     "wholesaler",
     "supplier",
     "trader",
@@ -154,4 +154,5 @@ x = [
     "plywood manufacturer",
     "laminate manufacturer",
     "paint supplier"
+
 ]
