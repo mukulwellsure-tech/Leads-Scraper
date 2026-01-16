@@ -122,19 +122,25 @@ def main():
 
             # ---------- TRY GOOGLE MAPS ----------
             phone = get_phone_google_maps(driver, gmap)
-
-            # ---------- FALLBACK TO JUSTDIAL ----------
-            if not phone:
-                print("  → Trying Justdial...")
-                phone = get_phone_justdial(driver, justdial)
+            source = None
 
             if phone:
-                print(f"  ✔ Found: {phone}")
+                source = "Google Maps"
+            else:
+                # ---------- FALLBACK TO JUSTDIAL ----------
+                print("  → Trying Justdial...")
+                phone = get_phone_justdial(driver, justdial)
+                if phone:
+                    source = "Justdial"
+
+            if phone:
+                print(f"  ✔ Found: {phone} ({source})")
                 results.append({
                     "Seller name": name,
                     "City": city,
                     "State": state,
-                    "Phone": phone
+                    "Phone": phone,
+                    "Source": source
                 })
                 save_progress(results)
             else:
@@ -153,9 +159,10 @@ def main():
         driver.quit()
 
 
-
 if __name__ == "__main__":
     main()
+
+
 
 
 
