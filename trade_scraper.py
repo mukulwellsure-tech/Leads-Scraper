@@ -8,7 +8,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
@@ -32,17 +31,19 @@ WAIT_MIN = 2
 WAIT_MAX = 4
 
 # =====================================================
-# KEYWORD INTELLIGENCE
+# BRAND INTELLIGENCE
 # =====================================================
 BLACKLIST = {
-    "trader", "dealer", "distributor", "supplier",
-    "wholesaler", "retailer", "store", "shop"
+    "trader", "dealer", "distributor",
+    "supplier", "wholesaler", "retailer",
+    "shop", "store"
 }
 
 WHITELIST = {
-    "manufacturer", "manufacturing", "brand",
-    "industries", "factory", "private limited",
-    "pvt ltd", "limited"
+    "manufacturer", "manufacturing",
+    "industries", "factory",
+    "private limited", "pvt ltd",
+    "limited", "brand"
 }
 
 STRONG_SIGNALS = {
@@ -60,7 +61,7 @@ def evaluate_brand(name, category, website):
 
     for word in BLACKLIST:
         if word in text:
-            return -100, ["Trader keyword detected"]
+            return -100, ["Reseller keyword"]
 
     for word in WHITELIST:
         if word in text:
@@ -74,11 +75,11 @@ def evaluate_brand(name, category, website):
 
     if website:
         score += 20
-        signals.append("Website present")
+        signals.append("Website")
 
     if re.search(r"\b(pvt|private|ltd|limited)\b", text):
         score += 15
-        signals.append("Legal entity keyword")
+        signals.append("Legal entity")
 
     return score, list(set(signals))
 
@@ -95,31 +96,13 @@ def setup_driver():
     )
 
 # =====================================================
-# SAFE GOOGLE MAPS SEARCH (FIXED)
+# SAFE GOOGLE MAPS SEARCH (URL BASED)
 # =====================================================
-def perform_search(driver, query):
-    wait = WebDriverWait(driver, 20)
-
-    driver.get("https://www.google.com/maps")
-    time.sleep(4)
-
-    search_box = wait.until(
-        EC.element_to_be_clickable((By.ID, "searchboxinput"))
-    )
-
-    search_box.click()
-    time.sleep(1)
-
-    search_box.send_keys(Keys.CONTROL + "a")
-    search_box.send_keys(Keys.DELETE)
-    time.sleep(0.5)
-
-    for ch in query:
-        search_box.send_keys(ch)
-        time.sleep(0.05)
-
-    search_box.send_keys(Keys.ENTER)
-    time.sleep(6)
+def open_maps_search(driver, query):
+    q = query.replace(" ", "+")
+    url = f"https://www.google.com/maps/search/{q}"
+    driver.get(url)
+    time.sleep(5)
 
 # =====================================================
 # GOOGLE MAPS SCRAPER
@@ -128,19 +111,28 @@ def scrape_google_maps(driver, query):
     approved = []
     rejected = []
 
-    perform_search(driver, query)
+    open_maps_search(driver, query)
+
+    try:
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.XPATH, '//div[@role="article"]'))
+        )
+    except:
+        print("❌ No listings loaded")
+        return approved, rejected
 
     # Scroll results panel
     for _ in range(6):
         try:
-            driver.execute_script(
-                "document.querySelector('.m6QErb').scrollTop = document.querySelector('.m6QErb').scrollHeight"
-            )
+            driver.execute_script("""
+                const panel = document.querySelector('div[role="feed"]');
+                if (panel) panel.scrollTop = panel.scrollHeight;
+            """)
             time.sleep(2)
         except:
             break
 
-    listings = driver.find_elements(By.CLASS_NAME, "hfpxzc")[:MAX_RESULTS_PER_QUERY]
+    listings = driver.find_elements(By.XPATH, '//div[@role="article"]')[:MAX_RESULTS_PER_QUERY]
 
     for item in listings:
         try:
@@ -213,7 +205,7 @@ def scrape_google_maps(driver, query):
 
             time.sleep(random.uniform(WAIT_MIN, WAIT_MAX))
 
-        except Exception:
+        except:
             continue
 
     return approved, rejected
