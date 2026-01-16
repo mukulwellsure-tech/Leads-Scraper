@@ -8,6 +8,9 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # =====================================================
@@ -92,30 +95,57 @@ def setup_driver():
     )
 
 # =====================================================
+# SAFE GOOGLE MAPS SEARCH (FIXED)
+# =====================================================
+def perform_search(driver, query):
+    wait = WebDriverWait(driver, 20)
+
+    driver.get("https://www.google.com/maps")
+    time.sleep(4)
+
+    search_box = wait.until(
+        EC.element_to_be_clickable((By.ID, "searchboxinput"))
+    )
+
+    search_box.click()
+    time.sleep(1)
+
+    search_box.send_keys(Keys.CONTROL + "a")
+    search_box.send_keys(Keys.DELETE)
+    time.sleep(0.5)
+
+    for ch in query:
+        search_box.send_keys(ch)
+        time.sleep(0.05)
+
+    search_box.send_keys(Keys.ENTER)
+    time.sleep(6)
+
+# =====================================================
 # GOOGLE MAPS SCRAPER
 # =====================================================
 def scrape_google_maps(driver, query):
     approved = []
     rejected = []
 
-    driver.get("https://www.google.com/maps")
-    time.sleep(5)
+    perform_search(driver, query)
 
-    driver.find_element(By.ID, "searchboxinput").clear()
-    driver.find_element(By.ID, "searchboxinput").send_keys(query)
-    driver.find_element(By.ID, "searchbox-searchbutton").click()
-    time.sleep(5)
-
+    # Scroll results panel
     for _ in range(6):
-        driver.execute_script(
-            "document.querySelector('.m6QErb').scrollTop=100000"
-        )
-        time.sleep(2)
+        try:
+            driver.execute_script(
+                "document.querySelector('.m6QErb').scrollTop = document.querySelector('.m6QErb').scrollHeight"
+            )
+            time.sleep(2)
+        except:
+            break
 
     listings = driver.find_elements(By.CLASS_NAME, "hfpxzc")[:MAX_RESULTS_PER_QUERY]
 
     for item in listings:
         try:
+            driver.execute_script("arguments[0].scrollIntoView(true);", item)
+            time.sleep(1)
             item.click()
             time.sleep(3)
 
@@ -198,7 +228,7 @@ def main():
 
     try:
         for query in SEARCH_QUERIES:
-            print(f"🔍 {query}")
+            print(f"🔍 Searching: {query}")
             ok, bad = scrape_google_maps(driver, query)
             approved_all.extend(ok)
             rejected_all.extend(bad)
