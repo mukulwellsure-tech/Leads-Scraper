@@ -188,17 +188,17 @@ def main():
         for business in BUSINESS_TYPES:
             print(f"🔍 {business} | {city}")
 
-            # 1️⃣ GOOGLE MAPS FIRST
+            # 1️⃣ GOOGLE MAPS
             gm_leads = scrape_google_maps(driver, business, city)
-
-            found_numbers = {l["Phone"] for l in gm_leads}
             buffer.extend(gm_leads)
 
-            # 2️⃣ JUSTDIAL FALLBACK
-            if not gm_leads:
-                jd_leads = scrape_justdial(driver, business, city)
-                buffer.extend(jd_leads)
+            time.sleep(random.randint(2, 4))
 
+            # 2️⃣ JUSTDIAL
+            jd_leads = scrape_justdial(driver, business, city)
+            buffer.extend(jd_leads)
+
+            # 3️⃣ SAVE IN BATCHES
             if len(buffer) >= SAVE_EVERY:
                 added = save_rows(buffer)
                 total_added += added
@@ -207,6 +207,7 @@ def main():
 
             time.sleep(random.randint(*DELAY_RANGE))
 
+    # Final save
     if buffer:
         added = save_rows(buffer)
         total_added += added
