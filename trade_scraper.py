@@ -24,8 +24,7 @@ SEARCH_QUERIES = [
 ]
 
 MAX_RESULTS_PER_QUERY = 40
-OUTPUT_FILE = "Trademark_Owned_Sellers.xlsx"
-REJECTED_FILE = "Rejected_Sellers.xlsx"
+OUTPUT_FILE = "Trademark_Sellers_All.xlsx"
 
 WAIT_MIN = 2
 WAIT_MAX = 4
@@ -96,7 +95,7 @@ def setup_driver():
     )
 
 # =====================================================
-# SAFE GOOGLE MAPS SEARCH (URL BASED)
+# GOOGLE MAPS SEARCH
 # =====================================================
 def open_maps_search(driver, query):
     q = query.replace(" ", "+")
@@ -105,11 +104,10 @@ def open_maps_search(driver, query):
     time.sleep(5)
 
 # =====================================================
-# GOOGLE MAPS SCRAPER
+# SCRAPER
 # =====================================================
 def scrape_google_maps(driver, query):
-    approved = []
-    rejected = []
+    results = []
 
     open_maps_search(driver, query)
 
@@ -118,19 +116,16 @@ def scrape_google_maps(driver, query):
             EC.presence_of_element_located((By.XPATH, '//div[@role="article"]'))
         )
     except:
-        print("❌ No listings loaded")
-        return approved, rejected
+        print("No listings loaded for:", query)
+        return results
 
-    # Scroll results panel
+    # Scroll panel
     for _ in range(6):
-        try:
-            driver.execute_script("""
-                const panel = document.querySelector('div[role="feed"]');
-                if (panel) panel.scrollTop = panel.scrollHeight;
-            """)
-            time.sleep(2)
-        except:
-            break
+        driver.execute_script("""
+            const panel = document.querySelector('div[role="feed"]');
+            if (panel) panel.scrollTop = panel.scrollHeight;
+        """)
+        time.sleep(2)
 
     listings = driver.find_elements(By.XPATH, '//div[@role="article"]')[:MAX_RESULTS_PER_QUERY]
 
@@ -184,7 +179,7 @@ def scrape_google_maps(driver, query):
 
             score, signals = evaluate_brand(name, category, website)
 
-            record = {
+            results.append({
                 "Brand_Name": name,
                 "Phone": phone,
                 "Website": website,
@@ -196,43 +191,33 @@ def scrape_google_maps(driver, query):
                 "Confidence_Score": score,
                 "Status": "APPROVED" if score >= 60 else "REJECTED",
                 "Scraped_At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-
-            if score >= 60:
-                approved.append(record)
-            else:
-                rejected.append(record)
+            })
 
             time.sleep(random.uniform(WAIT_MIN, WAIT_MAX))
 
         except:
             continue
 
-    return approved, rejected
+    return results
 
 # =====================================================
 # MAIN
 # =====================================================
 def main():
     driver = setup_driver()
-    approved_all = []
-    rejected_all = []
+    all_results = []
 
     try:
         for query in SEARCH_QUERIES:
-            print(f"🔍 Searching: {query}")
-            ok, bad = scrape_google_maps(driver, query)
-            approved_all.extend(ok)
-            rejected_all.extend(bad)
+            print("Searching:", query)
+            all_results.extend(scrape_google_maps(driver, query))
     finally:
         driver.quit()
 
-    pd.DataFrame(approved_all).to_excel(OUTPUT_FILE, index=False)
-    pd.DataFrame(rejected_all).to_excel(REJECTED_FILE, index=False)
+    pd.DataFrame(all_results).to_excel(OUTPUT_FILE, index=False)
 
-    print("\n✅ SCRAPING COMPLETE")
-    print(f"Approved trademark owners: {len(approved_all)}")
-    print(f"Rejected listings: {len(rejected_all)}")
+    print("\nScraping complete")
+    print("Total businesses saved:", len(all_results))
 
 if __name__ == "__main__":
     main()
