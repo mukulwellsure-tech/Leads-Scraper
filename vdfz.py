@@ -12,7 +12,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import WebDriverException, StaleElementReferenceException
+from selenium.common.exceptions import (
+    WebDriverException,
+    TimeoutException,
+    StaleElementReferenceException
+)
 from webdriver_manager.chrome import ChromeDriverManager
 
 # =====================================================
@@ -20,18 +24,15 @@ from webdriver_manager.chrome import ChromeDriverManager
 # =====================================================
 NUM_BROWSERS = 3
 HEADLESS = False
+SAVE_EVERY = 20
 
 WAIT_MIN = 1.0
 WAIT_MAX = 2.0
-QUERY_COOLDOWN = (6, 12)
-CRASH_COOLDOWN = (20, 30)
+
+QUERY_COOLDOWN = (5, 10)
+CRASH_COOLDOWN = (15, 25)
 
 FINAL_OUTPUT = "Trademark_Sellers_All.xlsx"
-
-# =====================================================
-# INSTALL DRIVER ONCE (CRITICAL)
-# =====================================================
-CHROMEDRIVER_PATH = ChromeDriverManager().install()
 
 # =====================================================
 # RAJASTHAN DISTRICTS
@@ -54,43 +55,72 @@ KEYWORDS = [
 ]
 
 # =====================================================
-# DRIVER SETUP (PROCESS SAFE)
+# DRIVER SETUP (WINDOWS SAFE)
 # =====================================================
 def setup_driver(worker_id):
     options = Options()
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--start-maximized")
-    options.add_argument(f"--user-data-dir=chrome_profile_{worker_id}")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--remote-debugging-port=0")
 
     if HEADLESS:
         options.add_argument("--headless=new")
 
-    service = Service(CHROMEDRIVER_PATH)
-    return webdriver.Chrome(service=service, options=options)
+    for _ in range(3):
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+            return driver
+        except Exception:
+            time.sleep(5)
+
+    raise RuntimeError("❌ Chrome could not start")
 
 # =====================================================
-# SCRAPE ONE QUERY
+# END OF LIST DETECTION (CRITICAL FIX)
+# =====================================================
+def reached_end_of_list(driver):
+    try:
+        return "You've reached the end of the list" in driver.page_source
+    except:
+        return False
+
+# =====================================================
+# SCRAPE ONE QUERY SAFELY
 # =====================================================
 def scrape_query(driver, query, results):
+    print(f"🔍 Searching: {query}")
     driver.get(f"https://www.google.com/maps/search/{query.replace(' ', '+')}")
 
-    WebDriverWait(driver, 25).until(
-        EC.presence_of_element_located((By.XPATH, '//div[@role="article"]'))
-    )
+    try:
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.XPATH, '//div[@role="article"]'))
+        )
+    except TimeoutException:
+        return
 
     seen = set()
     stall = 0
 
-    while stall < 3:
+    while True:
+        if reached_end_of_list(driver):
+            print("🛑 End of list reached")
+            break
+
         cards = driver.find_elements(By.XPATH, '//div[@role="article"]')
-        found = 0
+        if not cards:
+            stall += 1
+            if stall >= 3:
+                break
+        else:
+            stall = 0
 
         for card in cards:
             try:
                 driver.execute_script("arguments[0].click();", card)
-
                 WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "DUwDvf"))
                 )
@@ -113,7 +143,7 @@ def scrape_query(driver, query, results):
                 except:
                     pass
 
-                if not phone or len(phone) < 10:
+                if len(phone) < 10:
                     continue
 
                 results.append({
@@ -124,73 +154,64 @@ def scrape_query(driver, query, results):
                     "Scraped_At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
 
-                found += 1
+                if len(results) % SAVE_EVERY == 0:
+                    save_partial(results)
+
                 time.sleep(random.uniform(WAIT_MIN, WAIT_MAX))
 
             except StaleElementReferenceException:
                 continue
+            except TimeoutException:
+                continue
 
-        if found == 0:
-            stall += 1
-        else:
-            stall = 0
-
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1.2)
-
-# =====================================================
-# WORKER
-# =====================================================
-def worker(worker_id, queries):
-    time.sleep(worker_id * 5)  # 🔑 stagger startup
-
-    output_file = f"output_part_{worker_id}.xlsx"
-    results = []
-
-    driver = setup_driver(worker_id)
-
-    for q in queries:
-        print(f"[Process-{worker_id}] 🔍 {q}")
-        while True:
-            try:
-                scrape_query(driver, q, results)
-                time.sleep(random.uniform(*QUERY_COOLDOWN))
-                break
-            except WebDriverException:
-                print(f"[Process-{worker_id}] 🔁 Chrome crashed, restarting...")
-                try:
-                    driver.quit()
-                except:
-                    pass
-                time.sleep(random.uniform(*CRASH_COOLDOWN))
-                driver = setup_driver(worker_id)
-
-    driver.quit()
-
-    if results:
-        pd.DataFrame(results).to_excel(output_file, index=False)
-        print(f"[Process-{worker_id}] 💾 Saved {len(results)} leads")
+        driver.execute_script("""
+            const feed = document.querySelector('div[role="feed"]');
+            if (feed) feed.scrollTop = feed.scrollHeight;
+        """)
+        time.sleep(1.5)
 
 # =====================================================
-# MERGE
+# SAVE PARTIAL (DEDUP SAFE)
 # =====================================================
-def merge_outputs():
-    dfs = []
-    for i in range(1, NUM_BROWSERS + 1):
-        f = f"output_part_{i}.xlsx"
-        if os.path.exists(f):
-            dfs.append(pd.read_excel(f))
+def save_partial(data):
+    df_new = pd.DataFrame(data)
 
-    if not dfs:
-        return
+    if os.path.exists(FINAL_OUTPUT):
+        df_old = pd.read_excel(FINAL_OUTPUT)
+        df = pd.concat([df_old, df_new], ignore_index=True)
+    else:
+        df = df_new
 
-    df = pd.concat(dfs, ignore_index=True)
     df["dedupe"] = df["Phone"] + "|" + df["Brand_Name"]
     df.drop_duplicates("dedupe", inplace=True)
     df.drop(columns=["dedupe"], inplace=True)
-    df.to_excel(FINAL_OUTPUT, index=False)
 
-    print(f"🏁 FINAL SAVED: {len(df)} CALLABLE LEADS")
+    df.to_excel(FINAL_OUTPUT, index=False)
+    print(f"💾 Saved {len(df)} total records")
+
+# =====================================================
+# WORKER PROCESS
+# =====================================================
+def worker(worker_id, queries):
+    time.sleep(worker_id * 5)
+    driver = setup_driver(worker_id)
+    results = []
+
+    for q in queries:
+        try:
+            scrape_query(driver, q, results)
+            time.sleep(random.uniform(*QUERY_COOLDOWN))
+        except WebDriverException:
+            print(f"⚠️ Chrome crash detected. Restarting...")
+            try:
+                driver.quit()
+            except:
+                pass
+            time.sleep(random.uniform(*CRASH_COOLDOWN))
+            driver = setup_driver(worker_id)
+
+    driver.quit()
+    save_partial(results)
 
 # =====================================================
 # MAIN
@@ -209,7 +230,12 @@ def main():
     for p in procs:
         p.join()
 
-    merge_outputs()
+    print("🏁 SCRAPING COMPLETE")
 
+# =====================================================
+# WINDOWS ENTRY POINT
+# =====================================================
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
